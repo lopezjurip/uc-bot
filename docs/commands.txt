@@ -1,0 +1,4 @@
+start - Iniciar este maravilloso bot.
+about - Información de este bot.
+cancelar - Cancela la acción actual.
+help - ¿No sabes cómo funciono?
