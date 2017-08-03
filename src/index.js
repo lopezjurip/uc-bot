@@ -17,13 +17,14 @@ const config = configuration();
 const manager = createSessionManager(config);
 const baseUrl = "http://buscacursos.uc.cl";
 
-// eslint-disable-next-line no-unused-vars
 const bot = createBot({
   manager,
   config,
   buscacursos: buscacursos({ baseUrl, fetch, $: cheerio }),
   info,
 });
+
+module.exports = bot;
 
 // eslint-disable-next-line no-console
 console.log(dedent`
