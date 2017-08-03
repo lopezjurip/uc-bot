@@ -1,4 +1,5 @@
 start - Iniciar este maravilloso bot.
+curso - Búsca información de un curso
 about - Información de este bot.
 cancelar - Cancela la acción actual.
 help - ¿No sabes cómo funciono?

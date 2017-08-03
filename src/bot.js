@@ -254,4 +254,11 @@ module.exports = function createBot(options) {
       await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
     }
   });
+
+  /**
+   * /classroom
+   */
+  bot.command(/^(classroom|place|sala)(_.+)?$/).invoke(async ctx => {
+    ctx.sendMessage("No está lista esta funcionalidad todavía.");
+  });
 };
