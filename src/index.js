@@ -3,6 +3,9 @@
 const dedent = require("dedent");
 const _ = require("lodash");
 const moment = require("moment");
+const fetch = require("node-fetch");
+const cheerio = require("cheerio");
+const buscacursos = require("buscacursos-uc").default;
 
 const createBot = require("./bot");
 const createSessionManager = require("./manager");
@@ -12,11 +15,13 @@ const info = require("../package.json");
 const config = configuration();
 
 const manager = createSessionManager(config);
+const baseUrl = "http://buscacursos.uc.cl";
 
 // eslint-disable-next-line no-unused-vars
 const bot = createBot({
   manager,
   config,
+  buscacursos: buscacursos({ baseUrl, fetch, $: cheerio }),
   info,
 });
 

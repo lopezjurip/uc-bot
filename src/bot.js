@@ -6,8 +6,24 @@ const moment = require("moment");
 const fs = require("mz/fs");
 const path = require("path");
 
+const PERIOD = {
+  year: 2017,
+  period: 2,
+};
+
+const match = {
+  "course": /^(course|curso)$/, // eslint-disable-line
+  "course_(NRC)": /^(course|curso)_\d+$/,
+  "course_(course)": /^(course|curso)_[A-z]{1,3}\d+$/,
+  "course_(course)_(section)": /^(course|curso)_[A-z]{1,3}\d+_\d+$/,
+
+  "(NRC)": /^(\d+)$/,
+  "(course)": /([A-z]{1,3}\d+)$/,
+  "(course)-(section)": /([A-z]{1,3}\d+)[-\s]{1,3}(\d+)$/,
+};
+
 module.exports = function createBot(options) {
-  const { manager, config, info } = options;
+  const { manager, config, buscacursos, info } = options;
   const token = config.get("TELEGRAM:TOKEN");
   const COMMANDS_PATH = path.join(__dirname, "..", "docs", "commands.txt");
 
@@ -54,9 +70,33 @@ module.exports = function createBot(options) {
       OK, dejaré de hacer lo que estaba haciendo.
       ¿Necesitas ayuda? Escribe /help.
     `,
-    menu: {
-      back: ":arrow_backward: Volver",
-      next: ":arrow_forward: Ver más",
+    courses: {
+      ask: dedent`
+        Escríbeme la *sigla*, *NRC*, o el *nombre del curso*.
+      `,
+      error: dedent`
+        Ha ocurrido un error consultando el buscacursos.
+      `,
+      found: dedent`
+        <% if (courses.length > 0) { %>
+        Encontré lo siguiente para el periodo (<%= period.year %>-<%= period.period %>):
+        <% courses.forEach(course => { %>
+        <%= course.NRC %> | <%= course.initials %>-<%= course.section %> (<%= course.credits %> cr.)
+        *<%= course.name %>*
+        Vacantes: <%= course.vacancy.available %>/<%= course.vacancy.total %>
+        Horario:
+        <% course.schedule.raw.forEach(item => { -%>
+          ↳ \`<%= item.type %>\`: <%= item.when %> @ /sala\_<%= item.where %>
+        <% }) -%>
+        Profesores:
+        <% course.teachers.forEach(teacher => { -%>
+          ↳ <%= teacher.name %>
+        <% }) -%>
+        <% }) -%>
+        <% } else { %>
+        Tu consulta no obtuvo resultados.
+        <% } %>
+      `,
     },
   });
 
@@ -110,5 +150,108 @@ module.exports = function createBot(options) {
   bot.command(/^(cancel|cancelar)/).invoke(async ctx => {
     ctx.hideKeyboard();
     await ctx.sendMessage("cancel", { parse_mode: "Markdown" });
+  });
+
+  /**
+   * /course
+   */
+  bot
+    .command(match["course"])
+    .invoke(async ctx => {
+      await ctx.sendMessage("courses.ask", { parse_mode: "Markdown" });
+    })
+    .answer(async ctx => {
+      const answer = ctx.answer.toUpperCase();
+      if (match["(course)"].test(answer)) {
+        const [, course] = match["(course)"].exec(answer);
+        return await ctx.go(`course_${course}`);
+      } else if (match["(course)-(section)"].test(answer)) {
+        const [, course, section] = match["(course)-(section)"].exec(answer);
+        return await ctx.go(`course_${course}_${section}`);
+      } else if (match["(NRC)"].test(answer)) {
+        const [, NRC] = match["(NRC)"].exec(answer);
+        return await ctx.go(`course_${NRC}`);
+      }
+
+      // By name
+      const query = {
+        cxml_semestre: [PERIOD.year, PERIOD.period].join("-"),
+        cxml_nombre: answer,
+      };
+
+      ctx.data.period = PERIOD;
+
+      try {
+        ctx.data.courses = await buscacursos.getCourses(query);
+        await ctx.sendMessage("courses.found", { parse_mode: "Markdown" });
+      } catch (e) {
+        console.error(e);
+        await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
+      }
+    });
+
+  /**
+   * /course_(NRC)
+   */
+  bot.command(match["course_(NRC)"]).invoke(async ctx => {
+    const [, NRC] = ctx.command.name.split("_").map(s => s.toUpperCase());
+    const query = {
+      cxml_semestre: [PERIOD.year, PERIOD.period].join("-"),
+      cxml_nrc: NRC,
+    };
+
+    ctx.data.period = PERIOD;
+
+    try {
+      ctx.data.courses = await buscacursos.getCourses(query);
+      await ctx.sendMessage("courses.found", { parse_mode: "Markdown" });
+    } catch (e) {
+      console.error(e);
+      await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
+    }
+  });
+
+  /**
+   * /course_(course)
+   */
+  bot.command(match["course_(course)"]).invoke(async ctx => {
+    const [, initials] = ctx.command.name.split("_").map(s => s.toUpperCase());
+    const query = {
+      cxml_semestre: [PERIOD.year, PERIOD.period].join("-"),
+      cxml_sigla: initials,
+    };
+
+    ctx.data.period = PERIOD;
+
+    try {
+      ctx.data.courses = await buscacursos.getCourses(query);
+      await ctx.sendMessage("courses.found", { parse_mode: "Markdown" });
+    } catch (e) {
+      console.error(e);
+      await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
+    }
+  });
+
+  /**
+   * /course_(course)-(section)
+   */
+  bot.command(match["course_(course)_(section)"]).invoke(async ctx => {
+    const [, initials, section] = ctx.command.name.split("_").map(s => s.toUpperCase());
+    const query = {
+      cxml_semestre: [PERIOD.year, PERIOD.period].join("-"),
+      cxml_sigla: initials,
+    };
+
+    ctx.data.period = PERIOD;
+
+    try {
+      ctx.data.courses = (await buscacursos.getCourses(query)).filter(
+        course => String(course.section) === String(section)
+      );
+      await ctx.sendMessage("courses.found", { parse_mode: "Markdown" });
+    } catch (e) {
+      console.error(e);
+      await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
+    }
   });
 };
