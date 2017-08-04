@@ -74,6 +74,7 @@ module.exports = function createBot(options) {
     courses: {
       ask: dedent`
         Escríbeme la *sigla*, *NRC*, o el *nombre del curso*.
+        Si quieres cancelar esta acción, escribe /cancelar.
       `,
       error: dedent`
         Ha ocurrido un error consultando el buscacursos.
@@ -170,32 +171,36 @@ module.exports = function createBot(options) {
         ? ctx.answer.toUpperCase() // normal answer
         : (ctx.command.args || []).join(" ").toUpperCase(); // /course iic2233 2
 
+      let query = null;
+
       if (match["(course)"].test(answer)) {
-        const [, course] = match["(course)"].exec(answer);
-        return await ctx.go(`course_${course}`);
+        const [, initials] = match["(course)"].exec(answer);
+        query = {
+          period: PERIOD,
+          initials,
+        };
       } else if (match["(course)-(section)"].test(answer)) {
-        const [, course, section] = match["(course)-(section)"].exec(answer);
-        return await ctx.go(`course_${course}_${section}`);
+        const [, initials, section] = match["(course)-(section)"].exec(answer);
+        query = {
+          period: PERIOD,
+          initials,
+          section,
+        };
       } else if (match["(NRC)"].test(answer)) {
         const [, NRC] = match["(NRC)"].exec(answer);
-        return await ctx.go(`course_${NRC}`);
+        query = {
+          period: PERIOD,
+          NRC,
+        };
+      } else {
+        // By name
+        query = {
+          period: PERIOD,
+          name: answer,
+        };
       }
 
-      // By name
-      const query = {
-        cxml_semestre: [PERIOD.year, PERIOD.period].join("-"),
-        cxml_nombre: answer,
-      };
-
-      ctx.data.period = PERIOD;
-
-      try {
-        ctx.data.courses = await buscacursos.getCourses(query);
-        await ctx.sendMessage("courses.found", { parse_mode: "Markdown" });
-      } catch (e) {
-        console.error(e);
-        await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
-      }
+      return await ctx.go("query_course", { args: [JSON.stringify(query)] });
     });
 
   /**
@@ -204,19 +209,10 @@ module.exports = function createBot(options) {
   bot.command(match["course_(NRC)"]).invoke(async ctx => {
     const [, NRC] = ctx.command.name.split("_").map(s => s.toUpperCase());
     const query = {
-      cxml_semestre: [PERIOD.year, PERIOD.period].join("-"),
-      cxml_nrc: NRC,
+      period: PERIOD,
+      NRC,
     };
-
-    ctx.data.period = PERIOD;
-
-    try {
-      ctx.data.courses = await buscacursos.getCourses(query);
-      await ctx.sendMessage("courses.found", { parse_mode: "Markdown" });
-    } catch (e) {
-      console.error(e);
-      await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
-    }
+    return await ctx.go("query_course", { args: [JSON.stringify(query)] });
   });
 
   /**
@@ -225,19 +221,10 @@ module.exports = function createBot(options) {
   bot.command(match["course_(course)"]).invoke(async ctx => {
     const [, initials] = ctx.command.name.split("_").map(s => s.toUpperCase());
     const query = {
-      cxml_semestre: [PERIOD.year, PERIOD.period].join("-"),
-      cxml_sigla: initials,
+      period: PERIOD,
+      initials,
     };
-
-    ctx.data.period = PERIOD;
-
-    try {
-      ctx.data.courses = await buscacursos.getCourses(query);
-      await ctx.sendMessage("courses.found", { parse_mode: "Markdown" });
-    } catch (e) {
-      console.error(e);
-      await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
-    }
+    return await ctx.go("query_course", { args: [JSON.stringify(query)] });
   });
 
   /**
@@ -246,16 +233,34 @@ module.exports = function createBot(options) {
   bot.command(match["course_(course)_(section)"]).invoke(async ctx => {
     const [, initials, section] = ctx.command.name.split("_").map(s => s.toUpperCase());
     const query = {
-      cxml_semestre: [PERIOD.year, PERIOD.period].join("-"),
-      cxml_sigla: initials,
+      period: PERIOD,
+      initials,
+      section,
     };
+    return await ctx.go("query_course", { args: [JSON.stringify(query)] });
+  });
 
-    ctx.data.period = PERIOD;
-
+  /**
+   * Internal use.
+   */
+  bot.command("query_course").invoke(async ctx => {
     try {
-      ctx.data.courses = (await buscacursos.getCourses(query)).filter(
-        course => String(course.section) === String(section)
-      );
+      const options = JSON.parse(ctx.command.args);
+      const query = {
+        cxml_semestre: [options.period.year, options.period.period].join("-"),
+        cxml_sigla: options.initials,
+        cxml_nrc: options.NRC,
+        cxml_nombre: options.name,
+      };
+
+      let courses = await buscacursos.getCourses(query);
+      if ("section" in options) {
+        courses = courses.filter(course => String(course.section) === String(options.section));
+      }
+
+      ctx.data.period = options.period;
+      ctx.data.courses = courses;
+
       await ctx.sendMessage("courses.found", { parse_mode: "Markdown" });
     } catch (e) {
       console.error(e);
