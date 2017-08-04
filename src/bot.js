@@ -3,6 +3,7 @@
 const bb = require("bot-brother");
 const dedent = require("dedent");
 const moment = require("moment");
+const _ = require("lodash");
 const fs = require("mz/fs");
 const path = require("path");
 
@@ -12,10 +13,10 @@ const PERIOD = {
 };
 
 const match = {
-  "course": /^(course|curso)$/, // eslint-disable-line
+  "course": /^(course|curso|buscacursos)$/, // eslint-disable-line
   "course_(NRC)": /^(course|curso)_\d+$/,
-  "course_(course)": /^(course|curso)_[A-z]{1,3}\d+$/,
-  "course_(course)_(section)": /^(course|curso)_[A-z]{1,3}\d+_\d+$/,
+  "course_(course)": /^(course|curso)_[A-z]{1,3}[A-z0-9]+$/,
+  "course_(course)_(section)": /^(course|curso)_[A-z]{1,3}[A-z0-9]+_\d+$/,
 
   "(NRC)": /^(\d+)$/,
   "(course)": /([A-z]{1,3}\d+)$/,
@@ -86,7 +87,7 @@ module.exports = function createBot(options) {
         Vacantes: <%= course.vacancy.available %>/<%= course.vacancy.total %>
         Horario:
         <% course.schedule.raw.forEach(item => { -%>
-          ↳ \`<%= item.type %>\`: <%= item.when %> @ /sala\_<%= item.where %>
+          ↳ \`<%= item.type %>\`: <%= item.when %> @ /sala\_<%= item.where.replace("_", String.raw\`\_\`) %>
         <% }) -%>
         Profesores:
         <% course.teachers.forEach(teacher => { -%>
@@ -158,10 +159,17 @@ module.exports = function createBot(options) {
   bot
     .command(match["course"])
     .invoke(async ctx => {
-      await ctx.sendMessage("courses.ask", { parse_mode: "Markdown" });
+      if (_.isEmpty(ctx.command.args)) {
+        return await ctx.sendMessage("courses.ask", { parse_mode: "Markdown" });
+      } else {
+        return ctx.go("course", { type: "answer", args: ctx.command.args });
+      }
     })
     .answer(async ctx => {
-      const answer = ctx.answer.toUpperCase();
+      const answer = _.isEmpty(ctx.command.args)
+        ? ctx.answer.toUpperCase() // normal answer
+        : (ctx.command.args || []).join(" ").toUpperCase(); // /course iic2233 2
+
       if (match["(course)"].test(answer)) {
         const [, course] = match["(course)"].exec(answer);
         return await ctx.go(`course_${course}`);
