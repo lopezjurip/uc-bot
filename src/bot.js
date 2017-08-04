@@ -81,7 +81,8 @@ module.exports = function createBot(options) {
       `,
       found: dedent`
         <% if (courses.length > 0) { %>
-        Encontré lo siguiente para el periodo (<%= period.year %>-<%= period.period %>):
+        Encontré lo siguiente para el periodo (<%= period.year %>-<%= period.period %>).
+        :book: Mostrando página <%= paging.current + 1 %> de <%= paging.pages %>:
         <% courses.forEach(course => { %>
         <%= course.NRC %> | <%= course.initials %>-<%= course.section %> (<%= course.credits %> cr.)
         *<%= course.name %>*
@@ -99,6 +100,10 @@ module.exports = function createBot(options) {
         Tu consulta no obtuvo resultados.
         <% } %>
       `,
+    },
+    menu: {
+      back: ":arrow_backward: Volver",
+      next: ":arrow_forward: Ver más",
     },
   });
 
@@ -125,6 +130,7 @@ module.exports = function createBot(options) {
     // Use String.raw to fix scape problem.
     ctx.data.commands = txt.replace("_", String.raw`\_`).split("\n").filter(Boolean);
     ctx.data.user = ctx.meta.user;
+    await ctx.bot.api.sendChatAction(ctx.meta.chat.id, "typing");
     await ctx.sendMessage("start", { parse_mode: "Markdown" });
   });
 
@@ -142,6 +148,7 @@ module.exports = function createBot(options) {
    */
   bot.command(/^(about|acerca)/).invoke(async ctx => {
     ctx.data.info = info;
+    await ctx.bot.api.sendChatAction(ctx.meta.chat.id, "typing");
     await ctx.sendMessage("about", { parse_mode: "Markdown" });
   });
 
@@ -151,6 +158,7 @@ module.exports = function createBot(options) {
    */
   bot.command(/^(cancel|cancelar)/).invoke(async ctx => {
     ctx.hideKeyboard();
+    await ctx.bot.api.sendChatAction(ctx.meta.chat.id, "typing");
     await ctx.sendMessage("cancel", { parse_mode: "Markdown" });
   });
 
@@ -161,6 +169,7 @@ module.exports = function createBot(options) {
     .command(match["course"])
     .invoke(async ctx => {
       if (_.isEmpty(ctx.command.args)) {
+        await ctx.bot.api.sendChatAction(ctx.meta.chat.id, "typing");
         return await ctx.sendMessage("courses.ask", { parse_mode: "Markdown" });
       } else {
         return ctx.go("course", { type: "answer", args: ctx.command.args });
@@ -243,30 +252,103 @@ module.exports = function createBot(options) {
   /**
    * Internal use.
    */
-  bot.command("query_course").invoke(async ctx => {
-    try {
-      const options = JSON.parse(ctx.command.args);
-      const query = {
-        cxml_semestre: [options.period.year, options.period.period].join("-"),
-        cxml_sigla: options.initials,
-        cxml_nrc: options.NRC,
-        cxml_nombre: options.name,
-      };
+  bot
+    .command("query_course")
+    .invoke(async ctx => {
+      try {
+        const options = JSON.parse(ctx.command.args);
+        const query = {
+          cxml_semestre: [options.period.year, options.period.period].join("-"),
+          cxml_sigla: options.initials,
+          cxml_nrc: options.NRC,
+          cxml_nombre: options.name,
+        };
 
-      let courses = await buscacursos.getCourses(query);
-      if ("section" in options) {
-        courses = courses.filter(course => String(course.section) === String(options.section));
+        await ctx.bot.api.sendChatAction(ctx.meta.chat.id, "typing");
+        let courses = await buscacursos.getCourses(query);
+        if ("section" in options) {
+          courses = courses.filter(course => String(course.section) === String(options.section));
+        }
+
+        const pages = _.chunk(courses, config.get("PAGINATION:SIZE")); // paginate
+        const current = 0;
+
+        ctx.data.period = options.period;
+        ctx.data.courses = pages[current] || [];
+        ctx.data.paging = {
+          total: courses.length,
+          pages: pages.length,
+          current,
+        };
+
+        ctx.session.queryCourses = {
+          period: ctx.data.period,
+          pages,
+          paging: ctx.data.paging,
+        };
+
+        const buttons = _(pages[current] || [])
+          .map(course => ({
+            [`${course.initials}-${course.section}`]: { go: `course_${course.initials}_${course.section}` },
+          }))
+          .chunk(2)
+          .value();
+
+        ctx.inlineKeyboard([
+          ...buttons,
+          [
+            current > 0 && {
+              "menu.back": { callbackData: { i: current - 1 } },
+            },
+            current < ctx.data.paging.pages - 1 && {
+              "menu.next": { callbackData: { i: current + 1 } },
+            },
+          ].filter(Boolean),
+        ]);
+
+        return await ctx.sendMessage("courses.found", {
+          parse_mode: "Markdown",
+          reply_markup: { inline_keyboard: [[]] },
+        });
+      } catch (e) {
+        console.error(e);
+        await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
       }
+    })
+    .callback(async ctx => {
+      const { queryCourses: { pages, paging, period } } = ctx.session;
+      const { i: current } = ctx.callbackData;
 
-      ctx.data.period = options.period;
-      ctx.data.courses = courses;
+      ctx.data.period = period;
+      ctx.data.courses = pages[current] || [];
+      ctx.data.paging = Object.assign({}, paging, {
+        current,
+      });
 
-      await ctx.sendMessage("courses.found", { parse_mode: "Markdown" });
-    } catch (e) {
-      console.error(e);
-      await ctx.sendMessage("courses.error", { parse_mode: "Markdown" });
-    }
-  });
+      const buttons = _(pages[current] || [])
+        .map(course => ({
+          [`${course.initials}-${course.section}`]: { go: `course_${course.initials}_${course.section}` },
+        }))
+        .chunk(2)
+        .value();
+
+      ctx.inlineKeyboard([
+        ...buttons,
+        [
+          current > 0 && {
+            "menu.back": { callbackData: { i: current - 1 } },
+          },
+          current < ctx.data.paging.pages - 1 && {
+            "menu.next": { callbackData: { i: current + 1 } },
+          },
+        ].filter(Boolean),
+      ]);
+
+      return await ctx.sendMessage("courses.found", {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: [[]] }, // HACK
+      });
+    });
 
   /**
    * /classroom
