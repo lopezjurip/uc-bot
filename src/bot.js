@@ -344,9 +344,9 @@ module.exports = function createBot(options) {
         ].filter(Boolean),
       ]);
 
-      return await ctx.sendMessage("courses.found", {
+      await ctx.updateText("courses.found", {
         parse_mode: "Markdown",
-        reply_markup: { inline_keyboard: [[]] }, // HACK
+        // reply_markup: { inline_keyboard: [[]] }, // HACK
       });
     });
 
